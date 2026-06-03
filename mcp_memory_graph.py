@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-MCP Memory Graph Server v1.1 – исправленная версия
+MCP Memory Graph Server v1.2 – исправленная версия
 Графовая память: сущности, отношения, убеждения, факты, гипотезы.
 Извлекает знания из существующих записей conversation_memory без NLP.
 """
@@ -165,32 +165,31 @@ class GraphDB:
             conn.commit()
         return belief_id
 
-# В классе GraphDB, метод add_fact (примерно строка 250-270)
-def add_fact(self, statement: str, confidence: float, source_entry_id: str = None,
-             source_dialog_id: str = None, source_tool: str = None) -> str:
-    fact_id = self._make_id("fact", statement[:100])
-    now = datetime.now().timestamp()
-    with self._get_conn() as conn:
-        conn.execute("""
-            INSERT OR REPLACE INTO facts
-            (fact_id, statement, confidence, source_entry_id, source_dialog_id, source_tool,
-             verification_status, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (fact_id, statement, confidence, source_entry_id, source_dialog_id,
-              source_tool, 'verified', now))
-        conn.commit()
-    # ИСПРАВЛЕНИЕ: публикация события
-    try:
-        from mcp_cognitive_bus import publish
-        publish("fact_added", {
-            "fact_id": fact_id,
-            "statement": statement,
-            "confidence": confidence,
-            "source": source_tool or "memory_graph"
-        }, source="memory_graph")
-    except ImportError:
-        pass
-    return fact_id
+    def add_fact(self, statement: str, confidence: float, source_entry_id: str = None,
+                 source_dialog_id: str = None, source_tool: str = None) -> str:
+        fact_id = self._make_id("fact", statement[:100])
+        now = datetime.now().timestamp()
+        with self._get_conn() as conn:
+            conn.execute("""
+                INSERT OR REPLACE INTO facts
+                (fact_id, statement, confidence, source_entry_id, source_dialog_id, source_tool,
+                 verification_status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (fact_id, statement, confidence, source_entry_id, source_dialog_id,
+                  source_tool, 'verified', now))
+            conn.commit()
+        # Публикация события
+        try:
+            from mcp_cognitive_bus import publish
+            publish("fact_added", {
+                "fact_id": fact_id,
+                "statement": statement,
+                "confidence": confidence,
+                "source": source_tool or "memory_graph"
+            }, source="memory_graph")
+        except ImportError:
+            pass
+        return fact_id
 
     def add_hypothesis(self, statement: str, evidence: str, confidence: float = 0.3,
                        source_entry_id: str = None, source_dialog_id: str = None, 
@@ -259,6 +258,10 @@ def add_fact(self, statement: str, confidence: float, source_entry_id: str = Non
             return [dict(r) for r in rows]
 
     def query_facts(self, statement_filter: str = None, limit: int = 50) -> List[Dict]:
+        """
+        Поиск фактов по частичному совпадению с утверждением.
+        Возвращает список фактов, отсортированных по убыванию confidence.
+        """
         with self._get_conn() as conn:
             sql = "SELECT * FROM facts WHERE 1=1"
             params = []
